@@ -5,6 +5,7 @@ import com.innowise.aikufarbot.model.Apartment;
 import com.innowise.aikufarbot.model.Subscription;
 import com.innowise.aikufarbot.repository.SubscriptionRepository;
 import com.innowise.aikufarbot.service.KufarApiService;
+import com.innowise.aikufarbot.service.ApartmentMonitoringService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
@@ -14,6 +15,7 @@ import org.telegram.telegrambots.meta.api.objects.Update;
 import org.telegram.telegrambots.meta.api.objects.replykeyboard.ReplyKeyboardMarkup;
 import org.telegram.telegrambots.meta.api.objects.replykeyboard.buttons.KeyboardRow;
 import org.telegram.telegrambots.meta.exceptions.TelegramApiException;
+import org.springframework.scheduling.annotation.Scheduled;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -26,13 +28,14 @@ public class KufarBot extends TelegramLongPollingBot {
     private final TelegramBotConfig config;
     private final KufarApiService kufarService;
     private final SubscriptionRepository subscriptionRepository;
+    private final ApartmentMonitoringService apartmentMonitoringService;
 
-    public KufarBot(TelegramBotConfig config, KufarApiService kufarService, SubscriptionRepository subscriptionRepository) {
+    public KufarBot(TelegramBotConfig config, KufarApiService kufarService, SubscriptionRepository subscriptionRepository, ApartmentMonitoringService apartmentMonitoringService) {
         super(config.getToken());
         this.config = config;
         this.kufarService = kufarService;
         this.subscriptionRepository = subscriptionRepository;
-        log.info("Bot initialized with username: {}", config.getUsername());
+        this.apartmentMonitoringService = apartmentMonitoringService;
     }
 
     @Override
@@ -73,6 +76,46 @@ public class KufarBot extends TelegramLongPollingBot {
             }
         } catch (TelegramApiException e) {
             log.error("Error processing update: {}", e.getMessage(), e);
+        }
+    }
+
+    @Scheduled(fixedRateString = "${kufar.check-interval}")
+    public void checkNewApartments() {
+        List<Apartment> newApartments = apartmentMonitoringService.checkNewApartments();
+        if (newApartments != null) {
+            List<Subscription> activeSubscriptions = subscriptionRepository.findByActiveTrue();
+            if (!activeSubscriptions.isEmpty()) {
+                sendNewApartmentsNotification(newApartments, activeSubscriptions);
+            } else {
+                log.info("No active subscribers to notify");
+            }
+        }
+    }
+
+    private void sendNewApartmentsNotification(List<Apartment> newApartments, List<Subscription> subscriptions) {
+        for (int i = 0; i < newApartments.size(); i += 5) {
+            StringBuilder message = new StringBuilder("🆕 Новые объявления:\n\n");
+            int end = Math.min(i + 5, newApartments.size());
+
+            newApartments.subList(i, end).forEach(apartment -> 
+                message.append(String.format("🏠 %s\n💰 %s %s\n📍 %s\n🔗 %s\n\n %s\n\n",
+                    apartment.getAddress(),
+                    apartment.getPriceBYN(),
+                    apartment.getPriceUSD(),
+                    apartment.getParameters(),
+                    apartment.getUrl(),
+                    apartment.getPostedDate()
+                ))
+            );
+
+            String finalMessage = message.toString();
+            for (Subscription subscription : subscriptions) {
+                try {
+                    sendMessage(subscription.getChatId(), finalMessage);
+                } catch (TelegramApiException e) {
+                    log.error("Error sending notification to chat {}: {}", subscription.getChatId(), e.getMessage());
+                }
+            }
         }
     }
 
