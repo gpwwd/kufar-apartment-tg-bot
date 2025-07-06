@@ -1,6 +1,24 @@
 version: '3.8'
 
 services:
+  app:
+    build: .
+    depends_on:
+      - postgres
+    environment:
+      - SPRING_DATASOURCE_URL=${DB_URL_DOCKER}
+      - SPRING_DATASOURCE_USERNAME=${DB_USERNAME}
+      - SPRING_DATASOURCE_PASSWORD=${DB_PASSWORD}
+      - BOT_USERNAME=${BOT_USERNAME}
+      - BOT_TOKEN=${BOT_TOKEN}
+      - KUFAR_BASE_URL=${KUFAR_BASE_URL}
+      - KUFAR_CURRENCY=${KUFAR_CURRENCY}
+      - KUFAR_LOWER_PRICE=${KUFAR_LOWER_PRICE}
+      - KUFAR_UPPER_PRICE=${KUFAR_UPPER_PRICE}
+      - CHECK_INTERVAL=${CHECK_INTERVAL}
+    ports:
+      - "8080:8080"
+
   postgres:
     image: 'postgres:16.6'
     environment:
@@ -12,6 +30,11 @@ services:
       - "5400:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data/kufar-bot
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USERNAME} -d kufar-bot"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
 volumes:
   postgres_data:
